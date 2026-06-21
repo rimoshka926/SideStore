@@ -14,6 +14,10 @@ CODE_SIGN_ENTITLEMENTS = ./AltStore/AltStoreFree.entitlements
 // Codesigning settings defined optionally, see `CodeSigning.xcconfig.example`
 #include? "CodeSigning.xcconfig"
 
+// VIOSL custom config — anisette/telemetry URLs and backend secret.
+// See VIOSL.xcconfig.sample. In CI: generated from GitHub Secrets before build.
+#include? "VIOSL.xcconfig"
+
 ORG_PREFIX = $(ORG_IDENTIFIER)
 
 PRODUCT_NAME = SideStore
