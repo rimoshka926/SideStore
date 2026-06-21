@@ -32,7 +32,7 @@ concurrency:
 jobs:
   build:
     name: Build .ipa (ad-hoc, fakesign)
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
 
     steps:
@@ -41,19 +41,35 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Setup Xcode 26.4
+        uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: "26.4"
+
       # ldid: apply entitlements without Apple cert (ad-hoc fakesign)
       # xcbeautify: human-readable xcodebuild output in CI logs
       - name: Install build tools
         run: brew install ldid xcbeautify
 
       # Two-tier cache: exact hash first, branch prefix as fallback.
-      - name: Cache DerivedData
-        uses: actions/cache@v4
+      - name: Restore cache (exact)
+        id: cache-exact
+        uses: actions/cache/restore@v4
         with:
-          path: ~/Library/Developer/Xcode/DerivedData
-          key: deriveddata-${{ runner.os }}-${{ hashFiles('**/*.xcodeproj/**', '**/*.swift', 'Build.xcconfig') }}
-          restore-keys: |
-            deriveddata-${{ runner.os }}-
+          path: |
+            ~/Library/Developer/Xcode/DerivedData
+            ~/Library/Caches/org.swift.swiftpm
+          key: xcode-viosl-${{ github.ref_name }}-${{ github.sha }}
+
+      - name: Restore cache (fallback)
+        if: steps.cache-exact.outputs.cache-hit != 'true'
+        id: cache-fallback
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/Library/Developer/Xcode/DerivedData
+            ~/Library/Caches/org.swift.swiftpm
+          key: xcode-viosl-${{ github.ref_name }}-
 
       # VIOSL.xcconfig is gitignored; CI generates it from secrets/vars here.
       # URL values are logged; BACKEND_SECRET is filtered from logs.
@@ -78,6 +94,15 @@ jobs:
       #   zip dSYMs       -- SideStore.dSYMs.zip
       - name: Build .ipa
         run: python3 scripts/ci/workflow.py build
+
+      - name: Save cache
+        if: steps.cache-fallback.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/Library/Developer/Xcode/DerivedData
+            ~/Library/Caches/org.swift.swiftpm
+          key: xcode-viosl-${{ github.ref_name }}-${{ github.sha }}
 
       - name: Collect artifacts
         run: |
