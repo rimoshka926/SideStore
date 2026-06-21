@@ -1,0 +1,108 @@
+name: VIOSL — Build .ipa
+
+# Produces an ad-hoc .ipa (fakesigned with ldid, no Apple credentials in CI).
+# Final signing for installation: Sideloadly on Windows with burner Apple ID.
+#
+# Required GitHub repo secrets (Settings -> Secrets and variables -> Actions -> Secrets):
+#   BACKEND_SECRET  -- must match BACKEND_SECRET on the VIOSL backend server
+#
+# Optional GitHub repo variables (Settings -> Secrets and variables -> Actions -> Variables):
+#   ANISETTE_URL    -- production anisette URL, e.g. https://your-server/anisette/
+#   TELEMETRY_URL   -- production backend URL,  e.g. https://your-server/
+#
+# Local dev: copy VIOSL.xcconfig.sample -> VIOSL.xcconfig and fill in values.
+# VIOSL.xcconfig is gitignored; never commit real URLs or secrets.
+
+on:
+  push:
+    branches: [main, master, develop]
+  workflow_dispatch:
+    inputs:
+      anisette_url:
+        description: "Anisette URL (overrides repo variable ANISETTE_URL)"
+        required: false
+      telemetry_url:
+        description: "Telemetry URL (overrides repo variable TELEMETRY_URL)"
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build .ipa (ad-hoc, fakesign)
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout (recursive submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # ldid: apply entitlements without Apple cert (ad-hoc fakesign)
+      # xcbeautify: human-readable xcodebuild output in CI logs
+      - name: Install build tools
+        run: brew install ldid xcbeautify
+
+      # Two-tier cache: exact hash first, branch prefix as fallback.
+      - name: Cache DerivedData
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: deriveddata-${{ runner.os }}-${{ hashFiles('**/*.xcodeproj/**', '**/*.swift', 'Build.xcconfig') }}
+          restore-keys: |
+            deriveddata-${{ runner.os }}-
+
+      # VIOSL.xcconfig is gitignored; CI generates it from secrets/vars here.
+      # URL values are logged; BACKEND_SECRET is filtered from logs.
+      - name: Inject VIOSL.xcconfig
+        env:
+          VIOSL_ANISETTE_URL: ${{ inputs.anisette_url || vars.ANISETTE_URL || 'http://localhost:6969/' }}
+          VIOSL_TELEMETRY_URL: ${{ inputs.telemetry_url || vars.TELEMETRY_URL || 'http://localhost:8080/' }}
+          VIOSL_BACKEND_SECRET: ${{ secrets.BACKEND_SECRET || 'ci-placeholder' }}
+        run: |
+          cat > VIOSL.xcconfig << EOF
+          VIOSL_ANISETTE_URL = ${VIOSL_ANISETTE_URL}
+          VIOSL_TELEMETRY_URL = ${VIOSL_TELEMETRY_URL}
+          VIOSL_BACKEND_SECRET = ${VIOSL_BACKEND_SECRET}
+          EOF
+          echo "=== VIOSL.xcconfig (BACKEND_SECRET redacted) ==="
+          grep -v BACKEND_SECRET VIOSL.xcconfig
+
+      # workflow.py build() calls:
+      #   make build      -- xcodebuild archive (AD_HOC_CODE_SIGNING_ALLOWED=YES)
+      #   make fakesign   -- ldid applies entitlements to all binaries
+      #   make ipa        -- packages SideStore.xcarchive -> build/*.ipa
+      #   zip dSYMs       -- SideStore.dSYMs.zip
+      - name: Build .ipa
+        run: python3 scripts/ci/workflow.py build
+
+      - name: Collect artifacts
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          mkdir -p artifacts
+          IPA=$(find build -name "*.ipa" | head -1)
+          if [ -z "$IPA" ]; then
+            echo "ERROR: no .ipa found in build/" >&2 && exit 1
+          fi
+          cp "$IPA" "artifacts/VIOSL-SideStore-${SHORT_SHA}.ipa"
+          echo "Artifact: artifacts/VIOSL-SideStore-${SHORT_SHA}.ipa"
+
+      - name: Upload .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: VIOSL-SideStore-${{ github.sha }}
+          path: artifacts/*.ipa
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload dSYMs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: VIOSL-dSYMs-${{ github.sha }}
+          path: SideStore.dSYMs.zip
+          retention-days: 14
+          if-no-files-found: warn
