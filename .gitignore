@@ -80,3 +80,7 @@ release-notes.md
 *.txt
 
 Dependencies/minimuxer-*/
+
+# VIOSLCore Swift Package build artifacts
+VIOSLCore/.build/
+VIOSLCore/Package.resolved

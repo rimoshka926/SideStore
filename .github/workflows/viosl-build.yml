@@ -87,6 +87,14 @@ jobs:
           echo "=== VIOSL.xcconfig (BACKEND_SECRET redacted) ==="
           grep -v BACKEND_SECRET VIOSL.xcconfig
 
+      # VIOSLCore is a standalone Swift Package containing the pure scheduler logic.
+      # Tests run on macOS (no simulator needed) and verify:
+      #   - check≠auth invariant (zero re-signs when days_left >= threshold)
+      #   - circuit breaker states (closed/open/halfOpen + exponential backoff)
+      #   - pause flag, idempotency, priority ordering
+      - name: Test VIOSLCore (scheduler logic)
+        run: swift test --package-path VIOSLCore --parallel 2>&1
+
       # workflow.py build() calls:
       #   make build      -- xcodebuild archive (AD_HOC_CODE_SIGNING_ALLOWED=YES)
       #   make fakesign   -- ldid applies entitlements to all binaries

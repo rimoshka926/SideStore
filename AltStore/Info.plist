@@ -4,6 +4,12 @@
 <dict>
 	<key>ALTAnisetteURL</key>
 	<string>https://ani.sidestore.io</string>
+	<key>VIOSLAnisetteURL</key>
+	<string>$(VIOSL_ANISETTE_URL)</string>
+	<key>VIOSLTelemetryURL</key>
+	<string>$(VIOSL_TELEMETRY_URL)</string>
+	<key>VIOSLBackendSecret</key>
+	<string>$(VIOSL_BACKEND_SECRET)</string>
 	<key>ALTAppGroups</key>
 	<array>
 		<string>group.$(APP_GROUP_IDENTIFIER)</string>
