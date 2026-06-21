@@ -80,9 +80,12 @@ final class VIOSLScheduler {
 // MARK: - VIOSLRefreshGate
 
 /// Entry point called by AppDelegate, BGTask, and Shortcuts.
-/// Evaluates the scheduler decision and executes the appropriate action.
+/// Evaluates the scheduler decision and fires CHECK telemetry.
 ///
-/// Stage 7: decision + logging only. Re-sign execution wired in Stage 10.
+/// Returns the decision only; the actual re-sign is executed by SideStore's
+/// background-refresh path (AppDelegate.performBackgroundFetch →
+/// BackgroundRefreshAppsOperation), which records the breaker result and sends
+/// the RESIGN telemetry. Wired in Stage 10.
 final class VIOSLRefreshGate {
 
     static let shared = VIOSLRefreshGate()
@@ -125,13 +128,14 @@ final class VIOSLRefreshGate {
                 log.warning("RefreshGate: breaker blocked attempt after decide (race); skipping")
                 return .skip(.breakerOpen)
             }
-            // TODO Stage 10: invoke SideStore refresh operation here, then:
+            // The re-sign itself is NOT invoked here. AppDelegate.performBackgroundFetch
+            // calls this gate for the decision, then runs SideStore's background refresh.
+            // BackgroundRefreshAppsOperation.group.completionHandler then records the result:
             //   On success: breaker.recordSuccess()
-            //               Task { await VIOSLTelemetryClient.shared.send(certExpiry: newExpiry,
-            //                                                              signedAt: Date(), ok: true) }
+            //               + VIOSLTelemetryClient.shared.send(..., ok: true)
             //   On failure: breaker.recordFailure()
-            //               Task { await VIOSLTelemetryClient.shared.send(certExpiry: lastKnownExpiry,
-            //                                                              signedAt: Date(), ok: false) }
+            //               + VIOSLTelemetryClient.shared.send(..., ok: false)
+            // (Wired in Stage 10; see AltStore/Operations/BackgroundRefreshAppsOperation.swift.)
         case .skip(let reason):
             log.info("RefreshGate: SKIP (\(reason.rawValue, privacy: .public))")
         }
