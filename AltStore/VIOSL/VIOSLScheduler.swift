@@ -94,18 +94,30 @@ final class VIOSLRefreshGate {
         self.scheduler = scheduler
     }
 
-    /// Evaluates whether a re-sign is needed and logs the decision.
+    /// Evaluates whether a re-sign is needed, logs the decision, and fires telemetry.
     ///
     /// - Parameters:
     ///   - daysLeft: From the most recent cert info stored by SideStore.
+    ///   - certExpiry: Current certificate expiry date; `nil` when not yet known.
+    ///                 When provided, a telemetry CHECK report is sent on `.check` action.
     ///   - paused: From the last successful `/state` poll (defaults to `false` if backend unreachable).
     /// - Returns: The decided action. Caller may use this to drive UI or BGTask completion.
     @discardableResult
-    func evaluate(daysLeft: Double?, paused: Bool) -> VIOSLSchedulerAction {
+    func evaluate(daysLeft: Double?, certExpiry: Date? = nil, paused: Bool) -> VIOSLSchedulerAction {
         let action = scheduler.decide(daysLeft: daysLeft, paused: paused)
         switch action {
         case .check:
             log.info("RefreshGate: CHECK — cert healthy, no re-sign needed")
+            if let expiry = certExpiry {
+                // Report CHECK health to backend. Fire-and-forget; network failure queues the report.
+                Task {
+                    await VIOSLTelemetryClient.shared.send(
+                        certExpiry: expiry,
+                        signedAt: Date(),
+                        ok: true
+                    )
+                }
+            }
         case .resign:
             log.notice("RefreshGate: RESIGN — cert expiry within threshold, triggering re-sign")
             // Stateful breaker check: may transition open→halfOpen at this point.
@@ -113,8 +125,13 @@ final class VIOSLRefreshGate {
                 log.warning("RefreshGate: breaker blocked attempt after decide (race); skipping")
                 return .skip(.breakerOpen)
             }
-            // TODO Stage 10: invoke SideStore refresh operation here; call
-            //   breaker.recordSuccess() on success, breaker.recordFailure() on failure.
+            // TODO Stage 10: invoke SideStore refresh operation here, then:
+            //   On success: breaker.recordSuccess()
+            //               Task { await VIOSLTelemetryClient.shared.send(certExpiry: newExpiry,
+            //                                                              signedAt: Date(), ok: true) }
+            //   On failure: breaker.recordFailure()
+            //               Task { await VIOSLTelemetryClient.shared.send(certExpiry: lastKnownExpiry,
+            //                                                              signedAt: Date(), ok: false) }
         case .skip(let reason):
             log.info("RefreshGate: SKIP (\(reason.rawValue, privacy: .public))")
         }
