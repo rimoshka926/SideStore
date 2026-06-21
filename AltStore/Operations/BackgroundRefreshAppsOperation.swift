@@ -162,6 +162,23 @@ final class BackgroundRefreshAppsOperation: ResultOperation<[String: Result<Inst
                         }
                     }
                     group.completionHandler = { (results) in
+                        // VIOSL Stage 10: record resign outcome with circuit breaker + telemetry.
+                        // Runs on DispatchQueue.global() — dispatch to main to meet CircuitBreaker's
+                        // thread-safety requirement (callers must synchronize on main queue).
+                        DispatchQueue.main.async {
+                            switch results[StoreApp.altstoreAppID] {
+                            case .success(let installedApp):
+                                VIOSLScheduler.shared.breaker.recordSuccess()
+                                let expiry = installedApp.expirationDate
+                                Task { await VIOSLTelemetryClient.shared.send(certExpiry: expiry, signedAt: Date(), ok: true) }
+                            case .failure:
+                                VIOSLScheduler.shared.breaker.recordFailure()
+                                // No new expiry available; report failure with current time as placeholder.
+                                Task { await VIOSLTelemetryClient.shared.send(certExpiry: Date(), signedAt: Date(), ok: false) }
+                            case .none:
+                                break
+                            }
+                        }
                         self.finish(.success(results))
                     }
                     

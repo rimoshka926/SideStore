@@ -119,7 +119,17 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         #endif
         
         self.prepareForBackgroundFetch()
-        
+
+        // VIOSL Stage 10: drain offline telemetry queue + refresh backend cache + at-launch gate eval.
+        // Fire-and-forget; never blocks the launch path.
+        Task {
+            await VIOSLTelemetryClient.shared.drainQueue()
+            await VIOSLBackendPoller.shared.refreshCache()
+            let state = VIOSLBackendPoller.shared.cachedState()
+            let certExpiry = state.daysLeft.map { Date().addingTimeInterval($0 * 86400) }
+            VIOSLRefreshGate.shared.evaluate(daysLeft: state.daysLeft, certExpiry: certExpiry, paused: state.paused)
+        }
+
         return true
     }
     
@@ -458,6 +468,28 @@ extension AppDelegate
         
         DatabaseManager.shared.persistentContainer.performBackgroundTask { (context) in
             let installedApps = InstalledApp.fetchAppsForBackgroundRefresh(in: context)
+
+            // VIOSL Stage 10: gate — skip resign when cert is healthy to protect burner Apple ID.
+            // daysLeft from local CoreData cert record (most accurate); paused from cached backend state.
+            let viosl = installedApps.first(where: { $0.bundleIdentifier == StoreApp.altstoreAppID })
+            let daysLeft: Double? = viosl.map { $0.expirationDate.timeIntervalSinceNow / 86400 }
+            let cached = VIOSLBackendPoller.shared.cachedState()
+            let certExpiry = viosl?.expirationDate
+
+            let action = DispatchQueue.main.sync {
+                VIOSLRefreshGate.shared.evaluate(daysLeft: daysLeft, certExpiry: certExpiry, paused: cached.paused)
+            }
+
+            switch action {
+            case .check, .skip(.paused), .skip(.breakerOpen):
+                // Cert is healthy or refresh is blocked — skip costly resign, save Apple ID quota.
+                refreshAppsCompletionHandler(.success([:]))
+                return
+            case .resign, .skip(.noCertData):
+                // Resign needed or no data yet — proceed with normal SideStore refresh.
+                break
+            }
+
             AppManager.shared.backgroundRefresh(installedApps, completionHandler: refreshAppsCompletionHandler)
         }
     }
