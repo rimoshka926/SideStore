@@ -1,0 +1,17 @@
+// VIOSL overlay — copy to VIOSL.xcconfig and fill in your values.
+// VIOSL.xcconfig is gitignored; only this sample is committed.
+// In CI: generated automatically from GitHub Secrets/Variables before build.
+//
+// Usage:
+//   cp VIOSL.xcconfig.sample VIOSL.xcconfig
+//   # edit VIOSL.xcconfig with your local dev values
+
+// Self-hosted anisette server URL (Stage 7: on-device re-sign via minimuxer)
+VIOSL_ANISETTE_URL = http://localhost:6969/
+
+// VIOSL backend telemetry URL (Stage 8: POST /report after each re-sign)
+VIOSL_TELEMETRY_URL = http://localhost:8080/
+
+// Backend auth secret — must match BACKEND_SECRET env on the server
+// NEVER commit a real secret here
+VIOSL_BACKEND_SECRET = dev-placeholder
